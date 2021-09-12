@@ -1,5 +1,5 @@
 {
-  "name": "@xaviervia/micro-test",
+  "name": "@xaviervia/micro-snapshots",
   "version": "0.0.1",
   "main": "dist/index.js",
   "license": "MIT",
