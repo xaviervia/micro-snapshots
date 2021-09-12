@@ -6,7 +6,7 @@
   "files": [
     "dist"
   ],
-  "types": "./dist/index.d.ts",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc --build",
     "test": "ts-node test"
