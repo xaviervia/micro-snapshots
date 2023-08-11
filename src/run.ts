@@ -11,14 +11,12 @@ import { writeDeepFile } from "./utils/writeDeepFile"
 const noop = () => {}
 export const run = (
   tests: Test[],
-  basePath = "",
-  prefix = "__snapshots__",
+  snapshotsDirPath: string,
   overwrite = false,
   ci = false,
   match?: string,
   continuation: () => void = noop
 ) => {
-  const snapshotsDirPath = path.resolve(basePath, "..", prefix)
   try {
     mkdirSync(snapshotsDirPath)
   } catch (e) {}

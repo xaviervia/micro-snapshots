@@ -9,7 +9,8 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc --build",
-    "test": "ts-node test"
+    "test": "ts-node test",
+    "test-cleanup": "ts-node test/cleanup"
   },
   "devDependencies": {
     "@types/diff": "^5.0.1",

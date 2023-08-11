@@ -1,8 +1,9 @@
 import path from "path"
-import { Test } from "./types"
+import { CollectedTestName, Test } from "./types"
 import { run } from "./run"
 import { readFileSync, unlinkSync } from "fs"
 import chalk from "chalk"
+import { cleanupSnapshotFolders } from "./utils/cleanupSnapshotFolders"
 
 const getToMatch = (options?: {
   snapshotsFolderName?: string
@@ -38,7 +39,9 @@ export const runFiles = (
     shouldMatch?: string
     isCI?: boolean
     shouldReRun?: boolean
-  }
+    shouldCleanup?: boolean
+  },
+  collectedTestNames: CollectedTestName[] = []
 ) => {
   if (filePaths.length === 0) {
     try {
@@ -53,6 +56,11 @@ export const runFiles = (
         )
       )
     } catch (e) {}
+
+    if (options?.shouldCleanup === true) {
+      cleanupSnapshotFolders(collectedTestNames)
+    }
+
     return
   }
 
@@ -69,15 +77,30 @@ export const runFiles = (
   const resolvedFilePath = path.resolve(filePath)
   const { tests }: { tests: Test[] } = require(resolvedFilePath)
 
+  const snapshotFolderPrefix = options?.snapshotsFolderName ?? "__snapshots__"
+
+  const snapshotsDirPath = path.resolve(
+    resolvedFilePath,
+    "..",
+    snapshotFolderPrefix
+  )
+
+  const currentCollectedTestNames: CollectedTestName = {
+    snapshotsDirPath,
+    testNames: tests.map(([name]) => name),
+  }
+
   run(
     tests,
-    resolvedFilePath,
-    options?.snapshotsFolderName ?? "__snapshots__",
+    snapshotsDirPath,
     options?.shouldOverwrite ?? false,
     options?.isCI,
     toMatch,
     () => {
-      runFiles(rest, options)
+      runFiles(rest, options, [
+        ...collectedTestNames,
+        currentCollectedTestNames,
+      ])
     }
   )
 }
