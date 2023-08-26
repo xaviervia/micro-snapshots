@@ -55,12 +55,12 @@ const recurseOverTests = (
     process.exit(1)
   }
 
+  const resultString = resultToString(result)
+
   if (!overwrite) {
     let currentValue: string | null = null
     try {
       currentValue = readFileSync(filePath, "utf-8")
-
-      const resultString = resultToString(result)
 
       if (currentValue !== resultString) {
         const theDiff = diffLines(currentValue, resultString)
@@ -147,11 +147,68 @@ const recurseOverTests = (
       }
     } catch (e: any) {
       if ((e.message as string).startsWith("ENOENT")) {
-        writeFileSync(filePath, resultToString(result))
-        console.log(chalk.blue(name))
-        console.log(chalk.blue(chalk.bold("//written")))
+        if (ci) {
+          console.log(chalk.red(chalk.bold("//new")))
+          console.log(chalk.red(name))
+          process.exit(1)
+        }
+
+        const readline = createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        })
+
+        console.error(chalk.yellow(chalk.bold("//new")))
+        console.error(chalk.yellow(name))
         console.log()
-        recurseOverTests(rest, snapshotsDirPath, overwrite, ci, continuation)
+
+        console.log(resultString)
+        console.log()
+
+        if (resultString.split("\n").length > 16) {
+          console.log(chalk.yellow(chalk.bold("//new")))
+          console.log(chalk.yellow(name))
+          console.log()
+        }
+
+        readline.question(
+          chalk.bold("write?") + " not if no answer " + chalk.bold("(y/n/q) "),
+          (value) => {
+            if (value === "y") {
+              writeFileSync(filePath, resultToString(result))
+              console.log(chalk.blue(name))
+              console.log(chalk.blue(chalk.bold("//written")))
+              console.log()
+            } else if (value === "q") {
+              writeDeepFile(
+                path.resolve(process.cwd(), "node_modules"),
+                [".cache", "@xaviervia", "micro-snapshots", "last-test.txt"],
+                name
+              )
+
+              console.log("quitting")
+              console.log()
+              process.exit(1)
+            } else {
+              writeDeepFile(
+                path.resolve(process.cwd(), "node_modules"),
+                [".cache", "@xaviervia", "micro-snapshots", "last-test.txt"],
+                name
+              )
+              console.log("not written")
+              console.log()
+            }
+
+            readline.close()
+            recurseOverTests(
+              rest,
+              snapshotsDirPath,
+              overwrite,
+              ci,
+              continuation
+            )
+          }
+        )
       } else {
         console.error()
         console.error(chalk.red(chalk.bold("//error")))
