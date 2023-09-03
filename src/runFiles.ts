@@ -31,6 +31,8 @@ const getToMatch = (options?: {
   return options?.shouldMatch
 }
 
+let notifiedAboutMatch = false
+
 export const runFiles = (
   filePaths: string[],
   options?: {
@@ -66,11 +68,12 @@ export const runFiles = (
 
   const toMatch = getToMatch(options)
 
-  if (toMatch !== undefined) {
+  if (toMatch !== undefined && notifiedAboutMatch === false) {
     console.log()
     console.log(chalk.bold("//matching"))
     console.log(toMatch)
     console.log()
+    notifiedAboutMatch = true
   }
 
   const [filePath, ...rest] = filePaths
