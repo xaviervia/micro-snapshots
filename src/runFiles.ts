@@ -1,9 +1,10 @@
 import path from "path"
 import { CollectedTestName, Test } from "./types"
 import { run } from "./run"
-import { readFileSync, unlinkSync } from "fs"
-import chalk from "chalk"
+import { readFileSync } from "fs"
 import { cleanupSnapshotFolders } from "./utils/cleanupSnapshotFolders"
+import { removeCacheFile } from "./cacheFile"
+import * as logs from "./logs"
 
 const getToMatch = (options?: {
   snapshotsFolderName?: string
@@ -33,7 +34,7 @@ const getToMatch = (options?: {
 
 let notifiedAboutMatch = false
 
-export const runFiles = (
+export const runFiles = async (
   filePaths: string[],
   options?: {
     snapshotsFolderName?: string
@@ -46,18 +47,7 @@ export const runFiles = (
   collectedTestNames: CollectedTestName[] = []
 ) => {
   if (filePaths.length === 0) {
-    try {
-      unlinkSync(
-        path.resolve(
-          process.cwd(),
-          "node_modules",
-          ".cache",
-          "@xaviervia",
-          "micro-snapshots",
-          "last-test.txt"
-        )
-      )
-    } catch (e) {}
+    removeCacheFile()
 
     if (options?.shouldCleanup === true) {
       cleanupSnapshotFolders(collectedTestNames)
@@ -69,10 +59,7 @@ export const runFiles = (
   const toMatch = getToMatch(options)
 
   if (toMatch !== undefined && notifiedAboutMatch === false) {
-    console.log()
-    console.log(chalk.bold("//matching"))
-    console.log(toMatch)
-    console.log()
+    logs.matching(toMatch)
     notifiedAboutMatch = true
   }
 
@@ -93,14 +80,14 @@ export const runFiles = (
     testNames: tests.map(([name]) => name),
   }
 
-  run(
+  await run(
     tests,
     snapshotsDirPath,
     options?.shouldOverwrite ?? false,
     options?.isCI,
     toMatch,
-    () => {
-      runFiles(rest, options, [
+    async () => {
+      await runFiles(rest, options, [
         ...collectedTestNames,
         currentCollectedTestNames,
       ])

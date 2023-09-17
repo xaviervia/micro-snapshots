@@ -11,4 +11,6 @@ runFiles(testFiles, {
   snapshotsFolderName: SNAPSHOTS_FOLDER_NAME,
   shouldOverwrite,
   shouldMatch,
+  shouldCleanup: true,
+  shouldReRun: true,
 })

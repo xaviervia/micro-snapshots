@@ -1,60 +1,105 @@
 import path from "path"
-import { Result, Test } from "./types"
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs"
+import { mkdirSync, readFileSync, writeFileSync } from "fs"
 import chalk from "chalk"
-import { resultToString } from "./utils/resultToString"
 import { diffLines } from "diff"
-import { prettyPrintDiffChanges } from "./utils/prettyPrintDiffChanges"
 import { createInterface } from "readline"
-import { writeDeepFile } from "./utils/writeDeepFile"
+import isPromise from "is-promise"
+import { Result, Test } from "./types"
+import { prettyPrintDiffChanges } from "./utils/prettyPrintDiffChanges"
+import { resultToString } from "./utils/resultToString"
+import * as logs from "./logs"
+import { removeCacheFile, writeCacheFile } from "./cacheFile"
+import { getMatcher } from "./utils/getMatcher"
 
-const noop = () => {}
-export const run = (
+export const run = async (
   tests: Test[],
   snapshotsDirPath: string,
   overwrite = false,
   ci = false,
   match?: string,
-  continuation: () => void = noop
+  continuation: () => Promise<any> = async () => {}
 ) => {
   try {
     mkdirSync(snapshotsDirPath)
   } catch (e) {}
 
-  const matchedTests = tests.filter(([name]) =>
-    match !== undefined ? new RegExp(match).test(name) : true
-  )
+  const matcher = getMatcher(match)
+  const matchedTests = tests.filter(([name]) => {
+    return matcher(name)
+  })
 
-  recurseOverTests(matchedTests, snapshotsDirPath, overwrite, ci, continuation)
+  await recurseOverTests(
+    matchedTests,
+    snapshotsDirPath,
+    overwrite,
+    ci,
+    continuation
+  )
 }
 
-const recurseOverTests = (
+const recurseOverTests = async (
   tests: Test[],
   snapshotsDirPath: string,
   overwrite: boolean,
   ci: boolean,
-  continuation: () => void
+  continuation: () => Promise<any>
 ) => {
   if (tests.length === 0) {
-    continuation()
+    await continuation()
     return
   }
 
   const [[name, test], ...rest] = tests
 
   const filePath = path.resolve(snapshotsDirPath, name)
-  let result: Result
+  let result: Result | Promise<Result>
 
   try {
     result = test()
   } catch (e) {
-    console.error(chalk.red(chalk.bold("//failed")))
-    console.error(chalk.red(name))
-    console.error()
-    console.error(e)
+    logs.errorFailure(name, e as Error)
+
     process.exit(1)
   }
 
+  if (isPromise(result)) {
+    const promisedResult = await result
+
+    await processResult(
+      promisedResult as Result,
+      overwrite,
+      filePath,
+      name,
+      ci,
+      rest,
+      snapshotsDirPath,
+      continuation
+    )
+    return
+  }
+
+  await processResult(
+    result,
+    overwrite,
+    filePath,
+    name,
+    ci,
+    rest,
+    snapshotsDirPath,
+    continuation
+  )
+}
+
+const processResult = async (
+  result: Result,
+  overwrite: boolean,
+  filePath: string,
+  name: string,
+  ci: boolean,
+  rest: Test[],
+  snapshotsDirPath: string,
+  continuation: () => Promise<any>
+) => {
   const resultString = resultToString(result)
 
   if (!overwrite) {
@@ -65,9 +110,7 @@ const recurseOverTests = (
       if (currentValue !== resultString) {
         const theDiff = diffLines(currentValue, resultString)
 
-        console.error(chalk.yellow(chalk.bold("//diff")))
-        console.error(chalk.yellow(name))
-        console.log()
+        logs.diff(name)
 
         const prettyPrintedLineList = prettyPrintDiffChanges(theDiff, [])
 
@@ -76,148 +119,137 @@ const recurseOverTests = (
         console.log()
 
         if (!ci) {
-          const readline = createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          })
-
-          if (prettyPrintedLineList.length > 16) {
-            console.error(chalk.yellow(chalk.bold("//diff")))
-            console.error(chalk.yellow(name))
-            console.log()
-          }
-          readline.question(
-            chalk.bold("patch?") +
-              " not if no answer " +
-              chalk.bold("(y/n/q) "),
-            (value) => {
-              if (value === "y") {
-                console.log(chalk.blue(name))
-                console.log(chalk.blue(chalk.bold("//patched")))
-                console.log()
-                writeFileSync(filePath, resultToString(result))
-                try {
-                  unlinkSync(
-                    path.resolve(
-                      process.cwd(),
-                      "node_modules",
-                      ".cache",
-                      "@xaviervia",
-                      "micro-snapshots",
-                      "last-test.txt"
-                    )
-                  )
-                } catch (e) {}
-              } else if (value === "q") {
-                writeDeepFile(
-                  path.resolve(process.cwd(), "node_modules"),
-                  [".cache", "@xaviervia", "micro-snapshots", "last-test.txt"],
-                  name
-                )
-
-                console.log("quitting")
-                console.log()
-                process.exit(1)
-              } else {
-                writeDeepFile(
-                  path.resolve(process.cwd(), "node_modules"),
-                  [".cache", "@xaviervia", "micro-snapshots", "last-test.txt"],
-                  name
-                )
-                console.log("kept as it was")
-                console.log()
-              }
-
-              readline.close()
-              recurseOverTests(
-                rest,
-                snapshotsDirPath,
-                overwrite,
-                ci,
-                continuation
-              )
-            }
+          askQuestion(
+            prettyPrintedLineList,
+            filePath,
+            resultString,
+            name,
+            rest,
+            snapshotsDirPath,
+            overwrite,
+            ci,
+            continuation
           )
         } else {
           process.exit(1)
         }
       } else {
         writeFileSync(filePath, resultToString(result))
-        recurseOverTests(rest, snapshotsDirPath, overwrite, ci, continuation)
+        await recurseOverTests(
+          rest,
+          snapshotsDirPath,
+          overwrite,
+          ci,
+          continuation
+        )
       }
     } catch (e: any) {
-      if ((e.message as string).startsWith("ENOENT")) {
-        if (ci) {
-          console.log(chalk.red(chalk.bold("//new")))
-          console.log(chalk.red(name))
-          process.exit(1)
-        }
-
-        const readline = createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        })
-
-        console.error(chalk.yellow(chalk.bold("//new")))
-        console.error(chalk.yellow(name))
-        console.log()
-
-        console.log(resultString)
-        console.log()
-
-        if (resultString.split("\n").length > 16) {
-          console.log(chalk.yellow(chalk.bold("//new")))
-          console.log(chalk.yellow(name))
-          console.log()
-        }
-
-        readline.question(
-          chalk.bold("write?") + " not if no answer " + chalk.bold("(y/n/q) "),
-          (value) => {
-            if (value === "y") {
-              writeFileSync(filePath, resultToString(result))
-              console.log(chalk.blue(name))
-              console.log(chalk.blue(chalk.bold("//written")))
-              console.log()
-            } else if (value === "q") {
-              writeDeepFile(
-                path.resolve(process.cwd(), "node_modules"),
-                [".cache", "@xaviervia", "micro-snapshots", "last-test.txt"],
-                name
-              )
-
-              console.log("quitting")
-              console.log()
-              process.exit(1)
-            } else {
-              writeDeepFile(
-                path.resolve(process.cwd(), "node_modules"),
-                [".cache", "@xaviervia", "micro-snapshots", "last-test.txt"],
-                name
-              )
-              console.log("not written")
-              console.log()
-            }
-
-            readline.close()
-            recurseOverTests(
-              rest,
-              snapshotsDirPath,
-              overwrite,
-              ci,
-              continuation
-            )
-          }
-        )
-      } else {
-        console.error()
-        console.error(chalk.red(chalk.bold("//error")))
-        console.error(e)
-        process.exit(1)
-      }
+      processError(
+        e,
+        ci,
+        resultString,
+        filePath,
+        name,
+        rest,
+        snapshotsDirPath,
+        overwrite,
+        continuation
+      )
     }
   } else {
     writeFileSync(filePath, resultToString(result))
-    recurseOverTests(rest, snapshotsDirPath, overwrite, ci, continuation)
+    await recurseOverTests(rest, snapshotsDirPath, overwrite, ci, continuation)
+  }
+}
+
+const askQuestion = (
+  prettyPrintedLineList: string[],
+  filePath: string,
+  resultString: string,
+  name: string,
+  rest: Test[],
+  snapshotsDirPath: string,
+  overwrite: boolean,
+  ci: boolean,
+  continuation: () => Promise<any>
+) => {
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
+
+  if (prettyPrintedLineList.length > 16) {
+    logs.diff(name)
+  }
+  readline.question(
+    chalk.bold("patch?") + " not if no answer " + chalk.bold("(y/n/q) "),
+    (value) => {
+      if (value === "y") {
+        logs.patched(name)
+        writeFileSync(filePath, resultString)
+        removeCacheFile()
+      } else if (value === "q") {
+        writeCacheFile(name)
+
+        logs.quitting()
+        process.exit(1)
+      } else {
+        writeCacheFile(name)
+        logs.keptTheSame()
+      }
+
+      readline.close()
+      recurseOverTests(rest, snapshotsDirPath, overwrite, ci, continuation)
+    }
+  )
+}
+
+const processError = (
+  e: Error,
+  ci: boolean,
+  resultString: string,
+  filePath: string,
+  name: string,
+  rest: Test[],
+  snapshotsDirPath: string,
+  overwrite: boolean,
+  continuation: () => Promise<any>
+) => {
+  if (e.message.startsWith("ENOENT")) {
+    if (ci) {
+      logs.newFailure(name)
+      process.exit(1)
+    }
+
+    const readline = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    })
+
+    logs.newTestReport(name, resultString)
+
+    readline.question(
+      chalk.bold("write?") + " not if no answer " + chalk.bold("(y/n/q) "),
+      (value) => {
+        if (value === "y") {
+          writeFileSync(filePath, resultString)
+          logs.written(name)
+        } else if (value === "q") {
+          writeCacheFile(name)
+
+          logs.quitting()
+          process.exit(1)
+        } else {
+          writeCacheFile(name)
+          logs.notWritten()
+        }
+
+        readline.close()
+        recurseOverTests(rest, snapshotsDirPath, overwrite, ci, continuation)
+      }
+    )
+  } else {
+    logs.nonTestSpecificFailure(e)
+    process.exit(1)
   }
 }
