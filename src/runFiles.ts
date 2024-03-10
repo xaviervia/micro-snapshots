@@ -65,7 +65,7 @@ export const runFiles = async (
 
   const [filePath, ...rest] = filePaths
   const resolvedFilePath = path.resolve(filePath)
-  const { tests }: { tests: Test[] } = require(resolvedFilePath)
+  const { tests }: { tests: Test[] } = await import(resolvedFilePath)
 
   const snapshotFolderPrefix = options?.snapshotsFolderName ?? "__snapshots__"
 

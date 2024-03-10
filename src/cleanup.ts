@@ -2,7 +2,7 @@ import path from "path"
 import { CollectedTestName, Test } from "./types"
 import { cleanupSnapshotFolders } from "./utils/cleanupSnapshotFolders"
 
-export const cleanup = (
+export const cleanup = async (
   filePaths: string[],
   options?: {
     snapshotsFolderName?: string
@@ -20,7 +20,7 @@ export const cleanup = (
 
   const [filePath, ...rest] = filePaths
   const resolvedFilePath = path.resolve(filePath)
-  const { tests }: { tests: Test[] } = require(resolvedFilePath)
+  const { tests }: { tests: Test[] } = await import(resolvedFilePath)
 
   const snapshotFolderPrefix = options?.snapshotsFolderName ?? "__snapshots__"
 
